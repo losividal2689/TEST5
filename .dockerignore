@@ -1,6 +1,3 @@
-# =============================================================================
-# BERMUDA Stealth Gateway NG — Production Docker Exclusions
-# =============================================================================
 index.html
 *.html
 cockpit/
@@ -8,10 +5,10 @@ client/
 workspace/
 uploads/
 .git
-.github
 .gitignore
 README.md
 *.md
+docs/
 *.test
 *.out
 tmp/
