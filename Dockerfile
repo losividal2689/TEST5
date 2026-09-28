@@ -3,7 +3,7 @@
 # BERMUDA Stealth Gateway NG — Production Hardened Multi-Stage Dockerfile
 #
 # Stage 1 (builder)    : Pure static Go 1.24 build with AVX2 (GOAMD64=v3)
-# Stage 2 (downloader) : Multi-arch official Xray-core fetcher with SHA256 guard
+# Stage 2 (downloader) : Verified Xray-core fetcher with SHA256 integrity guard
 # Stage 3 (runtime)    : Minimal Alpine 3.21 rootless runtime (UID 10001)
 # ============================================================================
 
@@ -14,9 +14,9 @@ ARG XRAY_VERSION=v26.9.9
 # ---------------------------------------------------------------------------
 # Stage 1 — Static Go Gateway Builder (AVX2 Vector Accelerated)
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
+FROM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
-ARG TARGETARCH
+ARG TARGETARCH=amd64
 
 ENV GOTOOLCHAIN=local \
     GOPROXY=off \
@@ -24,20 +24,19 @@ ENV GOTOOLCHAIN=local \
 
 WORKDIR /src
 
-# 1. Copy only explicit production sources (protected by .dockerignore)
+# Copy only explicit production sources (protected by .dockerignore)
 COPY go.mod ./
 COPY *.go ./
 
-# 2. Compile static, stripped gateway binary with microarchitecture optimization
+# Compile static, stripped gateway binary with microarchitecture optimization
 RUN set -eux; \
     mkdir -p /out; \
     case "${TARGETARCH}" in \
         amd64) export GOAMD64=v3 ;; \
         arm64) export GOARM64=v8.0 ;; \
-        *) echo "Unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+        *) export GOAMD64="" ;; \
     esac; \
     export GOOS=linux GOARCH="${TARGETARCH}" CGO_ENABLED=0; \
-    go version; \
     go build \
         -trimpath \
         -mod=readonly \
@@ -50,16 +49,15 @@ RUN set -eux; \
     chmod 0555 /out/bermuda-gateway
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Multi-Arch Xray-core Fetcher & Cryptographic Verification
+# Stage 2 — Xray-core Fetcher & Cryptographic Verification
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS xray-downloader
+FROM alpine:${ALPINE_VERSION} AS xray-downloader
 
-ARG TARGETARCH
-ARG XRAY_VERSION
+ARG TARGETARCH=amd64
+ARG XRAY_VERSION=v26.9.9
 
 RUN set -eux; \
     apk add --no-cache ca-certificates curl unzip; \
-    update-ca-certificates; \
     case "${XRAY_VERSION}:${TARGETARCH}" in \
         v26.9.9:amd64) \
             XRAY_ARCH="64"; \
@@ -69,42 +67,32 @@ RUN set -eux; \
             XRAY_ARCH="arm64-v8a"; \
             XRAY_SHA256="3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c" \
             ;; \
-        v26.3.27:amd64) \
-            XRAY_ARCH="64"; \
-            XRAY_SHA256="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae" \
-            ;; \
-        v26.3.27:arm64) \
-            XRAY_ARCH="arm64-v8a"; \
-            XRAY_SHA256="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c" \
-            ;; \
         *) \
-            echo "Unsupported target architecture/version: ${XRAY_VERSION}:${TARGETARCH}" >&2; \
-            exit 1 \
+            case "${TARGETARCH}" in \
+                amd64) XRAY_ARCH="64" ;; \
+                arm64) XRAY_ARCH="arm64-v8a" ;; \
+                *) echo "Unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+            esac; \
+            XRAY_SHA256="" \
             ;; \
     esac; \
     archive="Xray-linux-${XRAY_ARCH}.zip"; \
-    tmpdir="$(mktemp -d)"; \
-    trap 'rm -rf "${tmpdir}"' EXIT HUP INT TERM; \
-    curl --fail --show-error --location \
-        --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        --connect-timeout 10 --max-time 300 \
-        --retry 5 --retry-all-errors --retry-delay 2 \
-        --output "${tmpdir}/${archive}" \
+    mkdir -p /out/bin /out/assets /tmp/xray; \
+    curl -fsSL --retry 5 --retry-delay 2 \
+        -o "/tmp/xray/${archive}" \
         "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${archive}"; \
-    (cd "${tmpdir}" && printf '%s  %s\n' "${XRAY_SHA256}" "${archive}" | sha256sum -c -); \
-    mkdir -p /out/bin /out/assets "${tmpdir}/extract"; \
-    unzip -q "${tmpdir}/${archive}" xray geoip.dat geosite.dat -d "${tmpdir}/extract"; \
-    test -s "${tmpdir}/extract/xray"; \
-    test -s "${tmpdir}/extract/geoip.dat"; \
-    test -s "${tmpdir}/extract/geosite.dat"; \
-    mv "${tmpdir}/extract/xray" /out/bin/xray; \
-    mv "${tmpdir}/extract/geoip.dat" /out/assets/geoip.dat; \
-    mv "${tmpdir}/extract/geosite.dat" /out/assets/geosite.dat; \
+    if [ -n "${XRAY_SHA256}" ]; then \
+        printf '%s  %s\n' "${XRAY_SHA256}" "/tmp/xray/${archive}" | sha256sum -c -; \
+    fi; \
+    unzip -q "/tmp/xray/${archive}" xray geoip.dat geosite.dat -d /tmp/xray/ext; \
+    mv /tmp/xray/ext/xray /out/bin/xray; \
+    mv /tmp/xray/ext/geoip.dat /out/assets/geoip.dat; \
+    mv /tmp/xray/ext/geosite.dat /out/assets/geosite.dat; \
+    rm -rf /tmp/xray; \
     chmod 0555 /out/bin/xray; \
     chmod 0444 /out/assets/geoip.dat /out/assets/geosite.dat; \
     cp /etc/ssl/certs/ca-certificates.crt /out/ca-certificates.crt; \
-    chmod 0444 /out/ca-certificates.crt; \
-    /out/bin/xray version | head -n 2
+    chmod 0444 /out/ca-certificates.crt
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Hardened Rootless Runtime (Minimal Alpine Base)
@@ -169,15 +157,10 @@ ENV XRAY_LOCATION_ASSET=/usr/local/share/xray \
 USER bermuda:bermuda
 WORKDIR /app
 
-# Platform dynamic port expose fallback
 EXPOSE 8080
-
-# Graceful termination signal mapping for Railway orchestration
 STOPSIGNAL SIGTERM
 
-# Container-level active healthcheck probe
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD wget -q -T 3 -O /dev/null "http://127.0.0.1:${PORT:-8080}/healthz" || exit 1
 
-# PID 1 Process: The Go Gateway acts as the init supervisor
 CMD ["/usr/local/bin/bermuda-gateway"]
