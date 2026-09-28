@@ -12,8 +12,6 @@ ARG ALPINE_VERSION=3.21
 # ------------------------------------------------------------------------------
 FROM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
-ARG TARGETARCH=amd64
-
 WORKDIR /src
 
 # 1. Copy source files
@@ -22,12 +20,7 @@ COPY *.go ./
 
 # 2. Compile static gateway binary with AVX2 vector acceleration
 RUN set -eux; \
-    case "${TARGETARCH}" in \
-        amd64) GO_ARCH_FLAGS="GOAMD64=v3" ;; \
-        arm64) GO_ARCH_FLAGS="GOARM64=v8.0" ;; \
-        *) GO_ARCH_FLAGS="" ;; \
-    esac; \
-    export ${GO_ARCH_FLAGS}; \
+    export GOAMD64=v3; \
     CGO_ENABLED=0 GOOS=linux go build \
         -trimpath \
         -tags netgo,osusergo \
@@ -37,25 +30,17 @@ RUN set -eux; \
     chmod 0555 /out/bermuda-gateway
 
 # ------------------------------------------------------------------------------
-# Stage 2 — Xray-core Downloader (Explicit Version & Architecture Guard)
+# Stage 2 — Direct Official Xray-core Downloader
 # ------------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION} AS xray-downloader
 
-ARG TARGETARCH=amd64
-ARG XRAY_VERSION=v26.9.9
-
 RUN set -eux; \
     apk add --no-cache ca-certificates curl unzip; \
-    case "${TARGETARCH}" in \
-        amd64) XRAY_ARCH="64" ;; \
-        arm64) XRAY_ARCH="arm64-v8a" ;; \
-        *) XRAY_ARCH="64" ;; \
-    esac; \
-    XRAY_ZIP="Xray-linux-${XRAY_ARCH}.zip"; \
-    XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ZIP}"; \
-    echo "Downloading official Xray-core ${XRAY_VERSION} (${XRAY_ZIP})..."; \
-    curl -fsSL --retry 5 --retry-delay 2 -o /tmp/xray.zip "${XRAY_URL}"; \
     mkdir -p /out/bin /out/assets; \
+    echo "Downloading official Xray-core v26.9.9 64-bit release..."; \
+    curl -fL --retry 5 --retry-delay 2 \
+        -o /tmp/xray.zip \
+        "https://github.com/XTLS/Xray-core/releases/download/v26.9.9/Xray-linux-64.zip"; \
     unzip -q /tmp/xray.zip xray -d /out/bin; \
     unzip -q /tmp/xray.zip geoip.dat geosite.dat -d /out/assets; \
     chmod 0555 /out/bin/xray; \
@@ -78,9 +63,8 @@ RUN set -eux; \
     update-ca-certificates; \
     addgroup -g 10001 -S bermuda; \
     adduser -u 10001 -S -D -H -G bermuda -h /app -s /sbin/nologin bermuda; \
-    mkdir -p /app /usr/local/share/xray /usr/local/bin /tmp; \
-    chown -R bermuda:bermuda /app /usr/local/share/xray; \
-    chmod 1777 /tmp
+    mkdir -p /app /usr/local/share/xray /usr/local/bin; \
+    chown -R bermuda:bermuda /app /usr/local/share/xray
 
 # 2. Copy artifacts with strict ownership
 COPY --from=builder --chown=bermuda:bermuda /out/bermuda-gateway /usr/local/bin/bermuda-gateway
