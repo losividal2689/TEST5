@@ -59,33 +59,28 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	log.Println("[Gateway] Initializing BERMUDA Stealth Gateway NG...")
 
-	// 1. Enforce memory constraints and pin scheduler to 2 vCPUs
 	applyMemoryCeiling(defaultSelfMemMB)
 	procs := applyGOMAXPROCS()
 	log.Printf("[Runtime] Gateway memory ceiling locked at %dMiB (GOGC=100), GOMAXPROCS=%d", defaultSelfMemMB, procs)
 
 	port := getEnv("PORT", defaultPort)
 
-	// 2. Instantiate supervisor (Non-fatal preflight like your original working system)
+	// Preflight non-fatal like your original working system
 	sup := NewSupervisor()
 	if err := sup.Preflight(); err != nil {
 		log.Printf("[Gateway] Warning: Supervisor preflight validation issue: %v. Continuing to start...", err)
 	}
 
-	// 3. Instantiate reverse proxy gateway with 64KiB channel buffer pool
 	gw := NewGateway(sup)
 
-	// 4. Capture container lifecycle termination signals
 	rootCtx, stopRoot := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stopRoot()
 
-	// 5. Run supervisor loop in a dedicated background goroutine
 	supErrCh := make(chan error, 1)
 	go func() {
 		supErrCh <- sup.Run(rootCtx)
 	}()
 
-	// 6. Configure HTTP edge server with line-rate socket tuning
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           gw.Handler(),
@@ -113,7 +108,6 @@ func main() {
 		}
 	}()
 
-	// 7. Await termination signal or unexpected fatal failures
 	select {
 	case err := <-serverErrCh:
 		log.Printf("[Gateway] Fatal: HTTP server failure: %v", err)
@@ -135,7 +129,7 @@ func main() {
 		log.Println("[Gateway] Termination signal intercepted. Commencing graceful drain sequence...")
 	}
 
-	// Graceful drain sequence
+	// 4-stage graceful drain
 	gw.SetDraining()
 	log.Println("[Gateway] Stage 1/4: /healthz flipped to 503 (traffic shedding)")
 
