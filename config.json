@@ -5,24 +5,13 @@
   },
   "dns": {
     "servers": [
-      {
-        "address": "https://1.1.1.1/dns-query",
-        "domains": ["regexp:.*"]
-      },
-      {
-        "address": "https://8.8.8.8/dns-query",
-        "domains": ["regexp:.*"]
-      },
-      {
-        "address": "https://8.8.4.4/dns-query",
-        "domains": ["regexp:.*"]
-      }
+      "https://1.1.1.1/dns-query",
+      "https://8.8.8.8/dns-query",
+      "https://8.8.4.4/dns-query"
     ],
     "queryStrategy": "UseIP",
     "disableCache": false,
-    "disableFallback": true,
-    "enableParallelQuery": true,
-    "useSystemHosts": false
+    "disableFallback": true
   },
   "policy": {
     "levels": {
@@ -77,6 +66,7 @@
           "mode": "auto",
           "xPaddingBytes": "100-1000",
           "scMaxEachPostBytes": 1000000,
+          "scMinPostsIntervalMs": "10-30",
           "scMaxBufferedPosts": 20,
           "scStreamUpServerSecs": "20-50"
         }
@@ -157,10 +147,12 @@
     {
       "tag": "direct-normal",
       "protocol": "freedom",
-      "settings": {},
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      },
       "streamSettings": {
         "sockopt": {
-          "domainStrategy": "ForceIPv4",
+          "domainStrategy": "UseIPv4",
           "tcpNoDelay": true,
           "tcpKeepAliveIdle": 60,
           "tcpKeepAliveInterval": 15,
@@ -171,10 +163,12 @@
     {
       "tag": "direct-ai",
       "protocol": "freedom",
-      "settings": {},
+      "settings": {
+        "domainStrategy": "UseIP"
+      },
       "streamSettings": {
         "sockopt": {
-          "domainStrategy": "ForceIP",
+          "domainStrategy": "UseIP",
           "happyEyeballs": {
             "prioritizeIPv6": true,
             "tryDelayMs": 250,
@@ -214,18 +208,9 @@
           "vless-ws-in",
           "trojan-ws-in"
         ],
-        "protocol": ["dns"],
-        "outboundTag": "dns-out"
-      },
-      {
-        "type": "field",
-        "inboundTag": [
-          "vless-xhttp-in",
-          "vless-ws-in",
-          "trojan-ws-in"
+        "protocol": [
+          "dns"
         ],
-        "network": "tcp,udp",
-        "port": "53",
         "outboundTag": "dns-out"
       },
       {
@@ -251,7 +236,9 @@
       },
       {
         "type": "field",
-        "protocol": ["bittorrent"],
+        "protocol": [
+          "bittorrent"
+        ],
         "outboundTag": "block"
       },
       {
@@ -287,12 +274,16 @@
       },
       {
         "type": "field",
-        "domain": ["geosite:category-ads-all"],
+        "domain": [
+          "geosite:category-ads-all"
+        ],
         "outboundTag": "block"
       },
       {
         "type": "field",
-        "user": ["ai@cazar"],
+        "user": [
+          "ai@cazar"
+        ],
         "outboundTag": "direct-ai"
       },
       {
