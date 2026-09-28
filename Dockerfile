@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 # ==============================================================================
 # BERMUDA Stealth Gateway NG — Production Multi-Stage Dockerfile
-# Tested & Hardened for Railway Deployment
+# ZERO-APK ARCHITECTURE (100% Immune to Alpine repository downtime)
 # ==============================================================================
 
 ARG GO_VERSION=1.24
 ARG ALPINE_VERSION=3.21
 
 # ------------------------------------------------------------------------------
-# Stage 1 — Go Gateway Static Builder (AVX2 Vector Accelerated)
+# Stage 1 — Go Gateway Builder & Direct Xray Fetcher (Zero APK Dependency)
 # ------------------------------------------------------------------------------
 FROM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
@@ -26,29 +26,23 @@ RUN set -eux; \
         -tags netgo,osusergo \
         -ldflags="-s -w -buildid=" \
         -o /out/bermuda-gateway .; \
-    test -s /out/bermuda-gateway; \
     chmod 0555 /out/bermuda-gateway
 
-# ------------------------------------------------------------------------------
-# Stage 2 — Direct Official Xray-core Downloader
-# ------------------------------------------------------------------------------
-FROM alpine:${ALPINE_VERSION} AS xray-downloader
-
+# 3. Download official Xray-core directly using built-in wget and unzip
+# (Zero apk repository calls — completely immune to dl-cdn.alpinelinux.org issues)
 RUN set -eux; \
-    apk add --no-cache ca-certificates curl unzip; \
-    mkdir -p /out/bin /out/assets; \
-    echo "Downloading official Xray-core v26.9.9 64-bit release..."; \
-    curl -fL --retry 5 --retry-delay 2 \
-        -o /tmp/xray.zip \
+    mkdir -p /out/bin /out/assets /tmp/xray; \
+    echo "Downloading official Xray-core v26.9.9 from GitHub..."; \
+    wget -q -O /tmp/xray/xray.zip \
         "https://github.com/XTLS/Xray-core/releases/download/v26.9.9/Xray-linux-64.zip"; \
-    unzip -q /tmp/xray.zip xray -d /out/bin; \
-    unzip -q /tmp/xray.zip geoip.dat geosite.dat -d /out/assets; \
+    unzip -q /tmp/xray/xray.zip xray -d /out/bin; \
+    unzip -q /tmp/xray/xray.zip geoip.dat geosite.dat -d /out/assets; \
     chmod 0555 /out/bin/xray; \
     chmod 0444 /out/assets/*.dat; \
-    rm -f /tmp/xray.zip
+    rm -rf /tmp/xray
 
 # ------------------------------------------------------------------------------
-# Stage 3 — Hardened Rootless Runtime (Minimal Alpine Base)
+# Stage 2 — Hardened Rootless Runtime (Zero APK Dependency)
 # ------------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION}
 
@@ -57,33 +51,32 @@ LABEL org.opencontainers.image.title="BERMUDA Stealth Gateway NG" \
       org.opencontainers.image.version="2.0-production" \
       org.opencontainers.image.licenses="MIT"
 
-# 1. Install runtime dependencies and configure unprivileged user (UID 10001)
+# 1. Setup unprivileged user using built-in busybox utilities (no apk needed)
 RUN set -eux; \
-    apk add --no-cache ca-certificates tzdata; \
-    update-ca-certificates; \
     addgroup -g 10001 -S bermuda; \
     adduser -u 10001 -S -D -H -G bermuda -h /app -s /sbin/nologin bermuda; \
-    mkdir -p /app /usr/local/share/xray /usr/local/bin; \
-    chown -R bermuda:bermuda /app /usr/local/share/xray
+    mkdir -p /app /usr/local/share/xray /usr/local/bin /etc/ssl/certs; \
+    chown -R bermuda:bermuda /app /usr/local/share/xray; \
+    chmod 1777 /tmp
 
-# 2. Copy artifacts with strict ownership
+# 2. Copy artifacts and SSL certificates directly from builder stage
 COPY --from=builder --chown=bermuda:bermuda /out/bermuda-gateway /usr/local/bin/bermuda-gateway
-COPY --from=xray-downloader --chown=bermuda:bermuda /out/bin/xray /usr/local/bin/xray
-COPY --from=xray-downloader --chown=bermuda:bermuda /out/assets/geoip.dat /usr/local/share/xray/geoip.dat
-COPY --from=xray-downloader --chown=bermuda:bermuda /out/assets/geosite.dat /usr/local/share/xray/geosite.dat
+COPY --from=builder --chown=bermuda:bermuda /out/bin/xray /usr/local/bin/xray
+COPY --from=builder --chown=bermuda:bermuda /out/assets/geoip.dat /usr/local/share/xray/geoip.dat
+COPY --from=builder --chown=bermuda:bermuda /out/assets/geosite.dat /usr/local/share/xray/geosite.dat
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --chown=bermuda:bermuda config.json /app/config.json
 
 # 3. Apply immutable file permissions
 RUN set -eux; \
     chmod 0555 /usr/local/bin/bermuda-gateway /usr/local/bin/xray; \
-    chmod 0444 /app/config.json /usr/local/share/xray/geoip.dat /usr/local/share/xray/geosite.dat; \
+    chmod 0444 /app/config.json /usr/local/share/xray/geoip.dat /usr/local/share/xray/geosite.dat /etc/ssl/certs/ca-certificates.crt; \
     test -s /usr/local/bin/bermuda-gateway; \
     test -s /usr/local/bin/xray; \
     test -s /app/config.json; \
     test -s /usr/local/share/xray/geoip.dat; \
     test -s /usr/local/share/xray/geosite.dat
 
-# 4. Standard runtime environment variables tuned for 2 vCPU & 1 GB RAM
 ENV XRAY_LOCATION_ASSET=/usr/local/share/xray \
     BERMUDA_XRAY_BIN=/usr/local/bin/xray \
     BERMUDA_XRAY_CONFIG=/app/config.json \
