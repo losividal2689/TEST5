@@ -1,0 +1,19 @@
+# =============================================================================
+# BERMUDA Stealth Gateway NG — Fail-Closed Docker Build Boundary
+#
+# Architectural Security Mandate:
+# 1. Default-Deny: Everything is blocked from the Docker build context by default.
+# 2. Strict Zero-Leakage: index.html (client cockpit) and client tools NEVER enter.
+# 3. Zero-Credential Image: config.json is excluded to prevent credentials from
+#    being baked into immutable Docker image layers or Git history.
+# =============================================================================
+
+# 1. Block everything in the workspace
+**
+
+# 2. Whitelist ONLY the exact root-level production inputs required for building
+!Dockerfile
+!.dockerignore
+!go.mod
+!*.go
+!railway.json
