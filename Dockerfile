@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ==============================================================================
-# BERMUDA Stealth Gateway NG — Bulletproof Self-Generating Dockerfile
+# BERMUDA Stealth Gateway NG — Self-Generating Production Dockerfile
 # ==============================================================================
 
 ARG GO_VERSION=1.24
@@ -8,7 +8,7 @@ ARG ALPINE_VERSION=3.21
 ARG XRAY_VERSION=v26.9.9
 
 # ------------------------------------------------------------------------------
-# Stage 1 — Go Gateway Static Builder
+# Stage 1 — Go Gateway Builder
 # ------------------------------------------------------------------------------
 FROM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
@@ -65,7 +65,7 @@ RUN set -eux; \
     chmod 0444 /out/assets/*.dat
 
 # ------------------------------------------------------------------------------
-# Stage 3 — Hardened Rootless Runtime (Minimal Alpine Base)
+# Stage 3 — Hardened Rootless Runtime
 # ------------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION}
 
@@ -83,7 +83,7 @@ RUN set -eux; \
     mkdir -p /app /usr/local/share/xray /usr/local/bin; \
     chown -R bermuda:bermuda /app /usr/local/share/xray
 
-# 2. Copy artifacts with strict ownership
+# 2. Copy artifacts from builder and downloader stages with strict ownership
 COPY --from=builder --chown=bermuda:bermuda /out/bermuda-gateway /usr/local/bin/bermuda-gateway
 COPY --from=xray-downloader --chown=bermuda:bermuda /out/bin/xray /usr/local/bin/xray
 COPY --from=xray-downloader --chown=bermuda:bermuda /out/assets/geoip.dat /usr/local/share/xray/geoip.dat
